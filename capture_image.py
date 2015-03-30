@@ -10,7 +10,7 @@ def capture_image(camera, context, target_dir='/tmp', sequence=0):
   if (sequence != 0):
     file_name = 'image-%05d.%s' % (sequence, extention)
   else :
-    file_name = 'image-%s.%s' % (int(time.time()), extention)
+    file_name = 'image-%s.%s' % (time.strftime('%Y%m%d-%H%M%S'), extention)
 
   target = os.path.join(target_dir, file_name)
 
