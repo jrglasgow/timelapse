@@ -10,60 +10,14 @@ import Image, ImageStat, math
 MIN_BRIGHTNESS = 20000
 MAX_BRIGHTNESS = 30000
 target_dir = '/media/usb'
-delay_seconds=10
+# delay between shots
+delay_seconds = 10
+# the number of images to average to determine if brightness nees to be adjusted
+b_avg = 10
+brightness = {}
+# the brightness tolerance before it is adjusted
+b_tolerence = 10
 
-CONFIGS = [
-  ("1/1600", 2), #"1/3200", 200 iso
-  ("1/1600", 2), #"1/2500", 200 iso
-  ("1/1600", 2), #"1/2000", 200 iso
-  ("1/2000", 2), #"1/1600", 200 iso
-  ("1/1600", 2), #"1/1250", 200 iso
-  ("1/1000", 2), # 1/1000", 200 iso
-  ("1/800", 2), # 1/800", 200 iso
-  ("1/800", 2), # 1/640", 200 iso
-  ("1/500", 2), # 1/500", 200 iso
-  ("1/500", 2), # 1/400", 200 iso
-  ("1/320", 2), # 1/320", 200 iso
-  ("1/250", 2), # 1/250", 200 iso
-  ("1/200", 2), # 1/200", 200 iso
-  ("1/160", 2), # 1/160", 200 iso
-  ("1/160", 2), # 1/125", 200 iso
-  ("1/100", 2), # 1/100", 200 iso
-  ("1/80", 2), # 1/80", 200 iso
-  ("1/60", 2), # 1/60", 200 iso
-  ("1/50", 2), # 1/50", 200 iso
-  ("1/40", 2), # 1/40", 200 iso
-  ("1/30", 2), # 1/30", 200 iso
-  ("1/20", 2), # 1/20", 200 iso
-  ("1/15", 2), # 1/15", 200 iso
-  ("1/13", 2), # 1/13", 200 iso
-  ("1/10", 2), # 1/10", 200 iso
-  ("1/6", 2), # 1/6", 200 iso
-  ("1/5", 2), # 1/5", 200 iso
-  ("1/4", 2), # 1/4", 200 iso
-  ("0.3", 2), # 0.3", 200 iso
-  ("0.3", 2), # 0.3", 200 iso
-  (17, 2), # 0.8", 200 iso
-  (16, 2), # 1", 200 iso
-  (15, 2), # 1.3", 200 iso
-  (14, 2), # 1.6", 200 iso
-  (13, 2), # 2", 200 iso
-  (12, 2), # 2.5", 200 iso
-  (11, 2), # 3.2", 200 iso
-  (10, 2), # 4", 200 iso
-  (9, 2), # 5", 200 iso
-  (8, 2), # 6", 200 iso
-  (7, 2), # 8", 200 iso
-  (6, 2), # 10", 200 iso
-  (5, 2), # 13", 200 iso
-  (4, 2), # 15", 200 iso
-  (3, 2), # 20", 200 iso
-  (2, 2), # 25", 200 iso
-  (1, 2), # 30", 200 iso
-  (1, 3), # 30", 400 iso
-  (1, 4), # 30", 800 iso
-  (1, 5), # 30", 1600 iso
-]
 
 def set_config(camera, context, config):
   pass
@@ -88,39 +42,174 @@ def check_preview_image(camera, context):
   brightness = get_brightness(preview_file)
   return brightness
 
-if __name__=='__main__':
+def trace(frame, event, arg):
+  print "%s, %s:%d" % (event, frame.f_code.co_filename, frame.f_lineno)
+  return trace
 
-  context = gp.Context()
-  camera = gp.Camera()
-  camera.init(context)
+#
+# adjust the brightness
+#
+def adjust_brightness(camera, context, sequence):
+  brightness[sequence % b_avg] = check_preview_image(camera, context)
+  #print "brightness: %s " % brightness
+  avg = average_brightness()
+  print "avg = %s" % avg
 
-  sequence = 1
+  if ((100 - avg) > b_tolerence):
+    print "needs to be brighter"
+    make_brighter(camera, context)
+    pass
+  elif ((avg - 100) > b_tolerence):
+    print "needs to be darker"
+    make_darker(camera, context)
+    pass
+  else:
+    pass
+  # get the current shutter speed
 
-  while 1:
-    start_time = time.time()
-    # get am image
-    image_path = capture_image(camera, context, target_dir, sequence)
-    print "Image %05d taken" % (sequence)
+#
+# change the shutterspeed to make the photos darker
+#
+def make_darker(camera, context):
+  # get the current brightness
+  config, speed = get_speed(camera, context)
+  print "shutter speed: %s" % speed.get_value()
+  setting_number = get_current_setting_number(speed)
+  if (setting_number > 0 and setting_number < (speed.count_choices() - 1)):
+    # the setting less than the maximum, so we can make it darker
+    print "set the shutter speed: %s" % (speed.get_choice(setting_number + 1))
+    speed.set_value(speed.get_choice(setting_number + 1))
+    camera.set_config(config, context)
+    pass
+  else:
+    print "dark as can get, nothing to do"
+    return
 
-    # check to see if the camera settings need to be changed
-    brightness = check_preview_image(camera, context)
-    print "brightness: %s " % brightness
+#
+# change the shutterspeed to make the photos brighter
+#
+def make_brighter(camera, context):
+  # get the current brightness
+  #
+  #config = camera.get_config(context)
+  config, speed = get_speed(camera, context)
+  print "shutter speed: %s" % speed.get_value()
+  #config.get_child_by_name('main').get_child_by_name('capturesettings').get_child_by_name('shutterspeed')
+  setting_number = get_current_setting_number(speed)
+  if (setting_number > 1 and setting_number < (speed.count_choices() - 1)):
+    # the setting greater than the minimum, so we can make it lighter
+    print "set the shutter speed: %s" % (speed.get_choice(setting_number - 1))
+    speed.set_value(speed.get_choice(setting_number - 1))
+    camera.set_config(config, context)
+    pass
+  else:
+    print "bright as can get, nothing to do"
+    return
 
+def get_speed(camera, context):
 
-    # change the settings if necessary
-    
-    # see how long it has taken
-    end_time = time.time()
-    total_time = end_time - start_time
+  config, speed = get_config(['main','capturesettings', 'shutterspeed'], camera, context);
+  #print "speed_config: %s" % speed_config
+  #shutter_speed = speed_config.get_value()
+  #print "shutter speed: %s" % speed_config.get_value()
+  #print "speed_config.count_choices(): %s" % speed_config.count_choices()
+  #print "setting_number: %s" % setting_number
+  return [config, speed]
 
-    # wait for next image
-    wait_time = delay_seconds - total_time
-    print "wait_time: %s seconds" % (wait_time)
-    if (wait_time > 0):
-      # there is some time left, so wait
-      time.sleep(delay_seconds - total_time)
+#
+# get a camera confgiuration
+#
+def get_config(path, camera, context):
+  path.reverse()
+  config = camera.get_config(context)
+  setting = traverse_config(path, config)
+  return [config, setting]
 
-    # increment the counter
-    sequence+=1
+#
+# get the setting number for the current choice
+#
+def get_current_setting_number(config):
+  for i in range(0, config.count_choices() - 1):
+    #print "%s : %s" % (i, config.get_choice(i))
+    if (config.get_choice(i) == config.get_value()):
+      return i
     pass
   pass
+
+#
+# recursively traverse the config to get the setting and change it
+#
+def traverse_config(path, config):
+  this_config = config.get_child_by_name(path.pop())
+  if (len(path)):
+    return traverse_config(path, this_config)
+  else:
+    return this_config
+  pass
+
+#
+# take the last b_avg brightness readings and calculate the average
+#
+def average_brightness():
+  b = 0.0
+  count = 0
+  for i in brightness.values():
+    b += i
+    count += 1
+    pass
+  return b/count
+
+#
+# run the timelapse
+#
+def timeLapse():
+  try:
+    context = gp.Context()
+    camera = gp.Camera()
+    camera.init(context)
+
+    sequence = 1
+    print "target_dir: %s" % target_dir
+    
+    while 1:
+      print ""
+      print ""
+      print ""
+      print ""
+      print ""
+      start_time = time.time()
+      #print "sequence: %05d" % sequence
+      # get an image
+      image_path = capture_image(camera, context, target_dir, sequence)
+      print "Image %05d taken" % (sequence)
+
+      # check to see if the camera settings need to be changed
+      avg = adjust_brightness(camera, context, sequence)
+
+
+      # change the settings if necessary
+
+      # see how long it has taken
+      end_time = time.time()
+      total_time = end_time - start_time
+
+      # wait for next image
+      wait_time = delay_seconds - total_time
+      print "wait_time: %s seconds" % (wait_time)
+      if (wait_time > 0):
+        # there is some time left, so wait
+        time.sleep(delay_seconds - total_time)
+
+      # increment the counter
+      sequence+=1
+      pass
+    pass
+  except KeyboardInterrupt:
+    camera.exit(context);
+    sys.exit();
+
+
+if __name__=='__main__':
+  #sys.settrace(trace)
+  timeLapse()
+
