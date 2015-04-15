@@ -1,15 +1,16 @@
 #!/usr/bin/env python
-
+from __future__ import print_function
 from capture_image import *
 import gphoto2 as gp
 import sys
-import time
+import time, logging
 import Image, ImageStat, math
 
 #MIN_INTER_SHOT_DELAY_SECONDS = timedelta(seconds=30)
 MIN_BRIGHTNESS = 20000
 MAX_BRIGHTNESS = 30000
 target_dir = '/media/usb'
+logfile = '/home/pi/bin/timelapse.log'
 # delay between shots
 delay_seconds = 10
 # the number of images to average to determine if brightness nees to be adjusted
@@ -18,6 +19,14 @@ brightness = {}
 # the brightness tolerance before it is adjusted
 b_tolerence = 10
 
+
+#
+# log something to the file
+#
+def log(text):
+  f = open(logfile, 'w+')
+  print ("%s| %s" % (time.strftime('%Y-%m-%d--%H-%M-%S'), text), file=f)
+  f.close()
 
 def set_config(camera, context, config):
   pass
@@ -43,7 +52,7 @@ def check_preview_image(camera, context):
   return brightness
 
 def trace(frame, event, arg):
-  print "%s, %s:%d" % (event, frame.f_code.co_filename, frame.f_lineno)
+  log("%s, %s:%d" % (event, frame.f_code.co_filename, frame.f_lineno))
   return trace
 
 #
@@ -53,14 +62,14 @@ def adjust_brightness(camera, context, sequence):
   brightness[sequence % b_avg] = check_preview_image(camera, context)
   #print "brightness: %s " % brightness
   avg = average_brightness()
-  print "avg = %s" % avg
+  log ("avg = %s" % avg)
 
   if ((100 - avg) > b_tolerence):
-    print "needs to be brighter"
+    log("needs to be brighter")
     make_brighter(camera, context)
     pass
   elif ((avg - 100) > b_tolerence):
-    print "needs to be darker"
+    log("needs to be darker")
     make_darker(camera, context)
     pass
   else:
@@ -73,16 +82,16 @@ def adjust_brightness(camera, context, sequence):
 def make_darker(camera, context):
   # get the current brightness
   config, speed = get_speed(camera, context)
-  print "shutter speed: %s" % speed.get_value()
+  log("shutter speed: %s" % speed.get_value())
   setting_number = get_current_setting_number(speed)
   if (setting_number > 0 and setting_number < (speed.count_choices() - 1)):
     # the setting less than the maximum, so we can make it darker
-    print "set the shutter speed: %s" % (speed.get_choice(setting_number + 1))
+    log("set the shutter speed: %s" % (speed.get_choice(setting_number + 1)))
     speed.set_value(speed.get_choice(setting_number + 1))
     camera.set_config(config, context)
     pass
   else:
-    print "dark as can get, nothing to do"
+    log("dark as can get, nothing to do")
     return
 
 #
@@ -93,17 +102,17 @@ def make_brighter(camera, context):
   #
   #config = camera.get_config(context)
   config, speed = get_speed(camera, context)
-  print "shutter speed: %s" % speed.get_value()
+  log("shutter speed: %s" % speed.get_value())
   #config.get_child_by_name('main').get_child_by_name('capturesettings').get_child_by_name('shutterspeed')
   setting_number = get_current_setting_number(speed)
   if (setting_number > 1 and setting_number < (speed.count_choices() - 1)):
     # the setting greater than the minimum, so we can make it lighter
-    print "set the shutter speed: %s" % (speed.get_choice(setting_number - 1))
+    log("set the shutter speed: %s" % (speed.get_choice(setting_number - 1)))
     speed.set_value(speed.get_choice(setting_number - 1))
     camera.set_config(config, context)
     pass
   else:
-    print "bright as can get, nothing to do"
+    log("bright as can get, nothing to do")
     return
 
 def get_speed(camera, context):
@@ -111,7 +120,7 @@ def get_speed(camera, context):
   config, speed = get_config(['main','capturesettings', 'shutterspeed'], camera, context);
   #print "speed_config: %s" % speed_config
   #shutter_speed = speed_config.get_value()
-  #print "shutter speed: %s" % speed_config.get_value()
+  log("shutter speed: %s" % speed_config.get_value())
   #print "speed_config.count_choices(): %s" % speed_config.count_choices()
   #print "setting_number: %s" % setting_number
   return [config, speed]
@@ -163,25 +172,40 @@ def average_brightness():
 # run the timelapse
 #
 def timeLapse():
+
+  camera_initialized = False
+  while (camera_initialized == False):
+    try:
+      context = gp.Context()
+      camera = gp.Camera()
+      camera.init(context)
+      camera_initialized = True
+    except gp.GPhoto2Error as e:
+      #print('e: %s' % e)
+      message = 'No Camera detected, is it asleep? Please wake it up or check batteries.'
+      print(message);
+      log(message)
+      time.sleep(10)
+
+
+  
   try:
-    context = gp.Context()
-    camera = gp.Camera()
-    camera.init(context)
+
 
     sequence = 1
-    print "target_dir: %s" % target_dir
+    log("target_dir: %s" % target_dir)
     
     while 1:
-      print ""
-      print ""
-      print ""
-      print ""
-      print ""
+      log('')
+      log('')
+      log('')
+      log('')
+      log('')
       start_time = time.time()
       #print "sequence: %05d" % sequence
       # get an image
       image_path = capture_image(camera, context, target_dir, sequence)
-      print "Image %05d taken" % (sequence)
+      log("Image %05d taken" % (sequence))
 
       # check to see if the camera settings need to be changed
       avg = adjust_brightness(camera, context, sequence)
@@ -195,21 +219,46 @@ def timeLapse():
 
       # wait for next image
       wait_time = delay_seconds - total_time
-      print "wait_time: %s seconds" % (wait_time)
+      log("wait_time: %s seconds" % (wait_time))
       if (wait_time > 0):
         # there is some time left, so wait
         time.sleep(delay_seconds - total_time)
 
       # increment the counter
-      sequence+=1
+      sequence += 1
       pass
     pass
   except KeyboardInterrupt:
-    camera.exit(context);
-    sys.exit();
+    camera.exit(context)
+    sys.exit()
+  except (RuntimeError, TypeError, NameError):
+    print('RuntimeError: %s' % RuntimeError)
+    print('TypeError: %s' % TypeError)
+    print('NameError: %s' % NameError)
 
+#
+# create a name for the new directory
+#
+def get_directory():
+  count = 0
+  while True:
+    temp = '%s/%s--%05d' % (target_dir, time.strftime('%Y-%m-%d'), count)
+    if os.path.exists(temp):
+      count += 1
+    else:
+      log("Files will be saved in this directory: %s " % (temp))
+      # make sure the directory is created
+      os.makedirs(temp)
+
+      return temp
 
 if __name__=='__main__':
+  logging.basicConfig(
+        format='%(levelname)s: %(name)s: %(message)s', level=logging.WARNING)
+
+  # create a new directory for this timelapse which is based on the current time
+  target_dir = get_directory()
+  
   #sys.settrace(trace)
   timeLapse()
 
